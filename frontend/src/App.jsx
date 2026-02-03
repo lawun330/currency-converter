@@ -82,6 +82,11 @@ function App() {
   const [loading, setLoading] = useState(false) // loading state
   const [error, setError] = useState(null) // error state
 
+  // clear converted result when currency dropdowns change
+  useEffect(() => {
+    setConverted(null)
+  }, [fromCurrency, toCurrency])
+
   // handle convert button click
   const handleConvert = async () => {
     const num = parseFloat(amount)

@@ -1,10 +1,12 @@
 .converter-panel {
-  width: 520px;
+  width: 100%;
+  max-width: 520px;
   padding: 16px;
   background: #fff;
   border-radius: 10px;
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
   border: 1px solid #e5e5e5;
+  margin: 0 auto;
 }
 
 .row {
@@ -188,4 +190,54 @@
   font-size: 12px;
   color: #b91c1c;
   margin-top: 8px;
+}
+
+/* Mobile responsive styles */
+@media (max-width: 640px) {
+  .converter-panel {
+    padding: 12px;
+    border-radius: 8px;
+    margin: 8px;
+    max-width: calc(100% - 16px);
+  }
+
+  .row-split {
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .half {
+    width: 100%;
+  }
+
+  .currency-select.currency-dropdown-trigger {
+    padding: 10px 28px 10px 12px;
+    font-size: 14px;
+  }
+
+  .amount-input {
+    padding: 10px 12px;
+    font-size: 16px; /* Prevents zoom on iOS */
+  }
+
+  .result-output {
+    padding: 10px 12px;
+    font-size: 16px;
+    min-height: 44px; /* Better touch target */
+  }
+
+  .convert-btn {
+    padding: 12px 16px;
+    font-size: 16px;
+    margin-top: 16px;
+  }
+
+  .currency-dropdown-list {
+    max-height: 200px;
+  }
+
+  .dropdown-label {
+    font-size: 10px;
+    margin-bottom: 6px;
+  }
 }
