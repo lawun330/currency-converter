@@ -1,0 +1,11 @@
+# environment and secrets
+.env
+.env.local
+.env.*.local
+
+# common
+node_modules/
+target/
+dist/
+*.log
+.DS_Store
