@@ -43,7 +43,7 @@ java Converter
 **Local Development (with MongoDB):**
 ```bash
 mvn clean compile
-mvn exec:java -Dexec.mainClass="Converter"
+mvn exec:java
 ```
 
 **Production Build:**
