@@ -12,7 +12,7 @@ import javax.swing.JPanel;
 
 public class Converter {
 
-  static QuestionDialog question;
+  static Listener question;
   static double amount = 0.0;
   static double conv_amount = 0.0;
   static double mmk_usd = 1/currencyFetcher("MMK");
@@ -40,7 +40,7 @@ public class Converter {
 
   // a method to choose currency type
   public static String askCurrType(final String text) {
-    question = new QuestionDialog();
+    question = new Listener();
     // create one grid layout
     question.setLayout(new GridLayout(0,1));
     // add the label to the grid 
