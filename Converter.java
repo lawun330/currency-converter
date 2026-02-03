@@ -25,39 +25,46 @@ public class Converter {
   private static Map<String, String> env = new HashMap<>();
 
 
-  /* Function to load .env from current working directory */
+  /* Function to load environment variables */
   private static void loadEnv() throws java.io.IOException {
 
-    // check the .env file
+    // step 1: check system environment variables (for production)
+    String systemApiUrl = System.getenv("CURRENCY_API_URL");
+    if (systemApiUrl != null && !systemApiUrl.isEmpty()) {
+      apiUrl = systemApiUrl;
+      return; // use system env var, skip .env file
+    }
+
+    // step 2: fallback to .env file (for local development)
     Path path = Path.of(System.getProperty("user.dir"), ".env");
-    if (!Files.isRegularFile(path)) {
-      throw new RuntimeException(".env file not found in current working directory");
+    if (Files.isRegularFile(path)) {
+      // read the .env file
+      for (String line : Files.readAllLines(path, StandardCharsets.UTF_8)) {
+        // step 2.1: remove leading/trailing whitespace from the line
+        line = line.trim();
+        // step 2.2: skip empty lines and comment lines (starting with #)
+        if (line.isEmpty() || line.startsWith("#")) continue;
+        // step 2.3: find the position of '=' character that separates key from value
+        int eq = line.indexOf('=');
+        // step 2.4: skip if no '=' found (eq == -1) or '=' is at start (eq == 0, invalid format)
+        if (eq <= 0) continue;
+        // step 2.5: extract key (everything before '=') and remove whitespace
+        String key = line.substring(0, eq).trim();
+        // step 2.6: extract value (everything after '=') and remove whitespace
+        String value = line.substring(eq + 1).trim();
+        // step 2.7: if value is wrapped in quotes (e.g. "value_here"), remove the quotes
+        if (value.startsWith("\"") && value.endsWith("\"")) value = value.substring(1, value.length() - 1);
+        // step 2.8: store key-value pair in env map (e.g. env.put("KEY", "value_here"))
+        env.put(key, value);
+      }
+
+      // get the CURRENCY_API_URL from .env file
+      apiUrl = env.get("CURRENCY_API_URL");
     }
 
-    // read the .env file
-    for (String line : Files.readAllLines(path, StandardCharsets.UTF_8)) {
-      // step 1: remove leading/trailing whitespace from the line
-      line = line.trim();
-      // step 2: skip empty lines and comment lines (starting with #)
-      if (line.isEmpty() || line.startsWith("#")) continue;
-      // step 3: find the position of '=' character that separates key from value
-      int eq = line.indexOf('=');
-      // step 4: skip if no '=' found (eq == -1) or '=' is at start (eq == 0, invalid format)
-      if (eq <= 0) continue;
-      // step 5: extract key (everything before '=') and remove whitespace
-      String key = line.substring(0, eq).trim();
-      // step 6: extract value (everything after '=') and remove whitespace
-      String value = line.substring(eq + 1).trim();
-      // step 7: if value is wrapped in quotes (e.g. "value_here"), remove the quotes
-      if (value.startsWith("\"") && value.endsWith("\"")) value = value.substring(1, value.length() - 1);
-      // step 8: store key-value pair in env map (e.g. env.put("KEY", "value_here"))
-      env.put(key, value);
-    }
-
-    // get the CURRENCY_API_URL
-    apiUrl = env.get("CURRENCY_API_URL");
+    // step 3: if not found in either place, throw error
     if (apiUrl == null || apiUrl.isEmpty()) {
-      throw new RuntimeException("CURRENCY_API_URL not found in .env");
+      throw new RuntimeException("CURRENCY_API_URL not found in system environment variables or .env file");
     }
   }
 
