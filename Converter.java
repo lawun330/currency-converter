@@ -1,176 +1,197 @@
-import java.awt.BorderLayout;
-import java.awt.GridLayout;
-import java.io.BufferedReader;
-import java.io.InputStreamReader;
-import java.net.HttpURLConnection;
-import java.net.URL;
-import java.util.ArrayList;
-import javax.swing.JButton;
-import javax.swing.JLabel;
-import javax.swing.JOptionPane;
-import javax.swing.JPanel;
+import java.io.OutputStream;              // writing response body bytes in main
+import java.net.InetSocketAddress;        // binding HTTP server to port in main
+import java.net.URI;                      // request URI in main, and URI.create(apiUrl) in fetchCurrencies
+import java.net.http.HttpClient;          // HTTP client in fetchCurrencies
+import java.net.http.HttpRequest;         // building GET request in fetchCurrencies
+import java.net.http.HttpResponse;        // reading API response in fetchCurrencies
+import java.nio.charset.StandardCharsets; // UTF-8 for request/response body in fetchCurrencies and main
+import java.nio.file.Files;               // reading .env file in loadEnv
+import java.nio.file.Path;                // path to .env in loadEnv
+import java.util.HashMap;                 // env map in loadEnv
+import java.util.Map;                     // env map type
+import java.util.regex.Matcher;           // matching currency rate in getUserCurrency
+import java.util.regex.Pattern;           // compiling regex in getUserCurrency
+import com.sun.net.httpserver.HttpServer; // HTTP server and /api/convert handler in main
 
+
+/* Class to fetch rates from exchangerate-api and expose conversion via HTTP GET request */
+// Example: /api/convert?from=USD&to=MMK&amount=100
 public class Converter {
 
-  static Listener question;
-  static double amount = 0.0;
-  static double conv_amount = 0.0;
-  static double mmk_usd = 1/currencyFetcher("MMK");
-  static double aud_usd = 1/currencyFetcher("AUD");
-  static double yen_usd = 1/currencyFetcher("JPY");
-  static double usd_mmk = currencyFetcher("MMK");
-  static double usd_aud = currencyFetcher("AUD");
-  static double usd_yen = currencyFetcher("JPY");
+  private static final long CACHE_MS = 300_000; // 5 minutes
+  private static String apiUrl;
+  private static String cachedData;
+  private static long cacheTime;
+  private static Map<String, String> env = new HashMap<>();
 
 
-  // a method to create a button
-  public static void addChoice(final String name) {
-    // create a panel to contain button and label
-    final JPanel choice =  new JPanel(new BorderLayout());	// create a border layout
-    // create a button
-    final JButton button = new JButton(name);
-    // record the answer
-    button.addActionListener(question);
-    // add the button to the panel
-    choice.add(button, BorderLayout.NORTH); // north orientation
-    // add the panel(border layout) to the grid layout(QBox)
-    question.add(choice);
+  /* Function to load .env from current working directory */
+  private static void loadEnv() throws java.io.IOException {
+
+    // check the .env file
+    Path path = Path.of(System.getProperty("user.dir"), ".env");
+    if (!Files.isRegularFile(path)) {
+      throw new RuntimeException(".env file not found in current working directory");
+    }
+
+    // read the .env file
+    for (String line : Files.readAllLines(path, StandardCharsets.UTF_8)) {
+      // step 1: remove leading/trailing whitespace from the line
+      line = line.trim();
+      // step 2: skip empty lines and comment lines (starting with #)
+      if (line.isEmpty() || line.startsWith("#")) continue;
+      // step 3: find the position of '=' character that separates key from value
+      int eq = line.indexOf('=');
+      // step 4: skip if no '=' found (eq == -1) or '=' is at start (eq == 0, invalid format)
+      if (eq <= 0) continue;
+      // step 5: extract key (everything before '=') and remove whitespace
+      String key = line.substring(0, eq).trim();
+      // step 6: extract value (everything after '=') and remove whitespace
+      String value = line.substring(eq + 1).trim();
+      // step 7: if value is wrapped in quotes (e.g. "value_here"), remove the quotes
+      if (value.startsWith("\"") && value.endsWith("\"")) value = value.substring(1, value.length() - 1);
+      // step 8: store key-value pair in env map (e.g. env.put("KEY", "value_here"))
+      env.put(key, value);
+    }
+
+    // get the CURRENCY_API_URL
+    apiUrl = env.get("CURRENCY_API_URL");
+    if (apiUrl == null || apiUrl.isEmpty()) {
+      throw new RuntimeException("CURRENCY_API_URL not found in .env");
+    }
   }
 
 
-  // a method to choose currency type
-  public static String askCurrType(final String text) {
-    question = new Listener();
-    // create one grid layout
-    question.setLayout(new GridLayout(0,1));
-    // add the label to the grid 
-    // position the text(question) CENTER within the label
-    question.add(new JLabel(text, JLabel.CENTER));
-    // add five buttons(five panels) to the grid layout(QBox)
-    addChoice("MMK");
-    addChoice("AUD");
-    addChoice("USD");
-    addChoice("YEN");
-    question.setModal(true); // dispose from memory = false
-    question.pack(); // resize the box
-    question.setLocationRelativeTo(null); // center the box to screen
-    question.setVisible(true); // show the box
-    if ((question.answer.equals("MMK")) || (question.answer.equals("AUD")) || (question.answer.equals("USD")) || (question.answer.equals("YEN"))) { // check the correct answer
-      return question.answer;
-    }
-    else {
-      JOptionPane.showMessageDialog(null, "Invalid currency");
-      askCurrType(text);
-    }
-    return "USD";
-  }
+  /* Function to fetch and cache the latest rates from the API */
+  private static String fetchCurrencies() {
 
-
-  // a method to get the numerical value of the currency
-  public static double askAmount(){
-    amount = Double.parseDouble(JOptionPane.showInputDialog("What is the amount?"));
-    if (amount >= 0.0) {
-      return amount;
+    // check if the response is cached
+    if (cachedData != null && System.currentTimeMillis() - cacheTime < CACHE_MS) {
+      return cachedData;
     }
-    else{
-      JOptionPane.showMessageDialog(null, "Invalid amount");
-      askAmount();
-    }
-    return 0.0;
-  }
 
-
-  // a method to convert the currency
-  public static double currencyFetcher(final String currency) {
-    // Build a string for the response
-    final StringBuilder response = new StringBuilder();
+    // fetch the latest rates from the API
     try {
-      // Create a URL object for the currency API.
-      final URL url = new URL("https://api.exchangerate-api.com/v6/latest");
-      // Open a connection to the API.
-      final HttpURLConnection connection = (HttpURLConnection) url.openConnection();
-      // Set the request method to GET.
-      connection.setRequestMethod("GET");
-      // Read the response from the API.
-      final BufferedReader reader = new BufferedReader(new InputStreamReader(connection.getInputStream()));
-      String line;
-      while ((line = reader.readLine()) != null) {
-        response.append(line); // store values in a stringbuilder
+      HttpClient client = HttpClient.newHttpClient();
+      HttpRequest request = HttpRequest.newBuilder()
+          .uri(URI.create(apiUrl))
+          .GET()
+          .build();
+      HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+      if (response.statusCode() == 200) {
+        cachedData = response.body();
+        cacheTime = System.currentTimeMillis();
+        return cachedData;
+      }
+    } catch (Exception e) {
+      System.err.println("Failed to fetch rates: " + e.getMessage());
+    }
+    return null;
+  }
+
+
+  /* Function to parse rate for the user's chosen currency code from JSON */
+  private static double getUserCurrency(final String json, final String currencyCode) {
+    if (json == null) return 0;
+    // regex example: match "USD":1 or "EUR":0.846294
+    Pattern p = Pattern.compile("\"" + Pattern.quote(currencyCode) + "\":([0-9.]+)");
+    Matcher m = p.matcher(json);
+    // if match found, return rate; otherwise return 0
+    return m.find() ? Double.parseDouble(m.group(1)) : 0;
+  }
+
+
+  /* Function to convert amount from one currency to another */
+  // All API rates are "1 USD = X units" of that currency
+  // Formula: amountInFrom * (rateTo / rateFrom) = amountInTo
+  // - (rateTo/rateFrom) = how many to-units per one from-unit
+  // Example: convert 200 SGD to THB
+  // - suppose API gives: 1 USD = 1.35 SGD and 1 USD = 35 THB
+  // - step 1: convert 200 SGD to USD = 200 / 1.35 = 148.15 USD
+  // - step 2: convert 148.15 USD to THB = 148.15 * 35 = 5185.19 THB
+  // - same as formula: 200 * (35 / 1.35) = 200 * 25.93 = 5185.19 THB
+  // Returns 0 if amount is negative or conversion fails
+  public static double convert(final String from, final String to, final double amount) {
+    if (amount < 0) return 0;
+    String json = fetchCurrencies();
+    double rateFrom = getUserCurrency(json, from);
+    double rateTo = getUserCurrency(json, to);
+    if (rateFrom <= 0 || rateTo <= 0) return 0;
+    return amount * (rateTo / rateFrom);
+  }
+
+
+  /* Function to parse query string parameters from user's request URL */
+  // Example: query = "from=USD&to=MMK&amount=100"
+  // - key = "from", "to", "amount"
+  // - returns "USD", "MMK", "100" or empty string if not found
+  private static String param(final String query, final String key) {
+    String prefix = key + "=";
+    for (String part : query.split("&")) {
+      if (part.startsWith(prefix)) {
+        return part.substring(prefix.length()).trim();
       }
     }
-    catch(final Exception e) {
-      System.out.println(e);
-    }
-    final String responseStr = response.toString(); // convert stringbuilder to string
-    final String[] arrOfStr = responseStr.split(","); // split the string into java array
-    // create a dynamic array to delete unnecessary values
-    final ArrayList<String> dynamicArr = new ArrayList<>();
-    for (final String element : arrOfStr) // copy everything into a dynamic array
-      dynamicArr.add(element);
-    for (int i = 0; i < 12; i++)    // now delete unnecessary values
-      dynamicArr.remove(0);
-    // manipulate arrayList elements to get three exchange rates out of many options
-    // store (AUD, JPY, MMK) in a new string array
-    final String[] currRates = { dynamicArr.get(8).split(":")[1], dynamicArr.get(71).split(":")[1], dynamicArr.get(91).split(":")[1] };
-    // convert these to double values
-    final Double[] currRatesInDouble = new Double[3];
-    int c = 0; // counter variable
-    for (final String curr : currRates)
-      currRatesInDouble[c++] = Double.parseDouble(curr);
-    // retrieve currency rates according to input
-    int index = 0;  // index variable
-    if (currency == "AUD") index = 0;
-    else if (currency == "JPY") index = 1;
-    else if (currency == "MMK") index = 2;
-    final double exchangeRate = currRatesInDouble[index];
-    return exchangeRate;
+    return "";
   }
 
 
-  // a method to show results
-  public static void displayResults(final String input, final String input_curr, final String output, final String output_curr) {
-    JOptionPane.showMessageDialog(null, input + " " + input_curr + " is equivalent to " + output + " " + output_curr);
-  }
+  /* Main function: starts HTTP server */
+  // Port priority: args > system env PORT > .env VITE_PORT > default 8080.
+  public static void main(final String[] args) throws Exception {
 
+    // load environment variables from .env file
+    loadEnv();
 
-  // main function
-  public static void main(final String[] args) {
-    final String current_currency = askCurrType("Welcome to our service. \n Choose the name of YOUR currency below");
-    amount = askAmount();
-    final String desired_currency = askCurrType("Choose the type for conversion");
-    // convert current currency to USD to make a standard system
-    double usd = 0.0; // initiate USD 
-    if (current_currency.equals("MMK")){
-       usd = mmk_usd * amount;
-    }
-    else if (current_currency.equals("AUD")){
-       usd = aud_usd * amount;
-    }
-    else if (current_currency.equals("USD")){
-       usd = amount;
-    }
-    else if (current_currency.equals("YEN")){
-       usd = yen_usd * amount;
-    }
-
-    // convert USD to required types
-    if (desired_currency.equals("MMK")){
-      conv_amount = usd_mmk * usd;
-    }
-    else if (desired_currency.equals("AUD")){
-      conv_amount = usd_aud * usd;
-    }
-    else if (desired_currency.equals("USD")){
-      conv_amount = usd;
-    }
-    else if (desired_currency.equals("YEN")){
-      conv_amount = usd_yen * usd;
+    // determine port to use
+    int port;
+    // A. check if PORT is passed as an argument
+    if (args.length > 0) {
+      port = Integer.parseInt(args[0]);
+    } else {
+      // B. check if PORT is set in the system environment variable
+      String portStr = System.getenv("PORT");
+      // C. check if VITE_PORT is set in the .env file (shared with frontend)
+      if (portStr == null || portStr.isEmpty()) {
+        portStr = env.get("VITE_PORT");
+      }
+      if (portStr != null && !portStr.isEmpty()) {
+        port = Integer.parseInt(portStr.trim());
+      } else {
+        port = 8080; // D. if PORT is not set in any of the above, use default 8080
+      }
     }
 
-    // display a rounded number (up to 2 decimal places)
-    displayResults(String.format("%.2f", amount), current_currency, String.format("%.2f", conv_amount), desired_currency);
+    // start HTTP server
+    HttpServer server = HttpServer.create(new InetSocketAddress(port), 0);
+    server.createContext("/api/convert", exchange -> {
+      if (!"GET".equals(exchange.getRequestMethod())) {
+        exchange.sendResponseHeaders(405, 0);
+        exchange.close();
+        return;
+      }
+      URI uri = exchange.getRequestURI();
+      String query = uri.getQuery() != null ? uri.getQuery() : "";
+      String from = param(query, "from");
+      String to = param(query, "to");
+      String amountStr = param(query, "amount");
+      double amount = 0;
+      try {
+        amount = Double.parseDouble(amountStr);
+      } catch (NumberFormatException ignored) {}
+      double result = convert(from, to, amount);
+      String body = "{\"from\":\"" + from + "\",\"to\":\"" + to + "\",\"amount\":" + amount
+          + ",\"result\":" + String.format("%.4f", result) + "}";
+      byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
+      exchange.getResponseHeaders().set("Content-Type", "application/json");
+      exchange.getResponseHeaders().set("Access-Control-Allow-Origin", "*");
+      exchange.sendResponseHeaders(200, bytes.length);
+      try (OutputStream out = exchange.getResponseBody()) {
+        out.write(bytes);
+      }
+    });
+    server.start();
+    System.out.println("Currency API on http://localhost:" + port + "/api/convert?from=USD&to=MMK&amount=100");
   }
 
 }
-
-
