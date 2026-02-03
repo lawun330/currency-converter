@@ -19,4 +19,4 @@ RUN mvn dependency:copy-dependencies -DoutputDirectory=target/dependency
 EXPOSE 8080
 
 # Run the application with classpath including dependencies
-CMD ["java", "-cp", "target/classes:target/dependency/*", "Converter"]
+CMD ["java", "-Djdk.tls.client.protocols=TLSv1.2", "-cp", "target/classes:target/dependency/*", "Converter"]
