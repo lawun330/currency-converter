@@ -9,9 +9,12 @@ This document lists all software versions, dependencies, and tools required to b
 **Java**: JDK 17 or higher
  - Used: Eclipse Temurin 17 JDK (as specified in Dockerfile)
 
-**No build tools (Maven/Gradle)**
- - No need for dependency management or complex build configuration
- - Docker handles the build process in production
+**Maven**: Latest version (installed in Dockerfile)
+ - Required for MongoDB Java Driver dependency
+ - Configuration: `pom.xml`
+
+**MongoDB Java Driver Sync**: 4.11.1
+   - Required for MongoDB Atlas connection
 
 ---
 
@@ -31,11 +34,20 @@ This document lists all software versions, dependencies, and tools required to b
 
 ### Backend
 
-No installation needed. Compile with:
+**Local Development (without MongoDB):**
 ```bash
 javac Converter.java
 java Converter
 ```
+
+**Local Development (with MongoDB):**
+```bash
+mvn clean compile
+mvn exec:java -Dexec.mainClass="Converter"
+```
+
+**Production Build:**
+Maven is used in Dockerfile to compile and include MongoDB driver dependencies.
 
 ### Frontend
 
@@ -57,9 +69,22 @@ npm run build
 
 ---
 
-## Notes
+## Database
 
-- All Java dependencies are part of the standard library - no external JAR files required
+**MongoDB Atlas**
+ - Cloud-hosted MongoDB databas used for storing conversion history
+ - Connection string format: `mongodb+srv://username:password@cluster.mongodb.net/database?retryWrites=true&w=majority`
+ - Database name: `currency_converter`
+ - Collection name: `conversions`
+
+**Note**: Application continues to work even if MongoDB is unavailable
+
+---
+
+## Summary
+
+- Java standard library used for HTTP server and API calls
+- MongoDB Java Driver (external dependency) is used for connecting to MongoDB Atlas
 - Frontend dependencies are managed via npm and listed in `package.json`
-- Docker is used for deployment but not required for local development
-- The project intentionally avoids build tools like Maven/Gradle for simplicity
+- Docker is used for deployment and includes Maven for building
+- Maven is required for MongoDB integration

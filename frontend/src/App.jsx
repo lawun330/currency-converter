@@ -81,11 +81,30 @@ function App() {
   const [converted, setConverted] = useState(null) // converted amount
   const [loading, setLoading] = useState(false) // loading state
   const [error, setError] = useState(null) // error state
+  const [history, setHistory] = useState([]) // last 5 conversions
 
   // clear converted result when currency dropdowns change
   useEffect(() => {
     setConverted(null)
   }, [fromCurrency, toCurrency])
+
+  // fetch conversion history from API
+  const fetchHistory = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/history`)
+      if (res.ok) {
+        const data = await res.json()
+        setHistory(Array.isArray(data) ? data : [])
+      }
+    } catch {
+      setHistory([])
+    }
+  }
+
+  // load history on mount
+  useEffect(() => {
+    fetchHistory()
+  }, [])
 
   // handle convert button click
   const handleConvert = async () => {
@@ -99,6 +118,7 @@ function App() {
       if (!res.ok) throw new Error('Conversion failed')
       const data = await res.json()
       setConverted(Number(data.result).toFixed(2))
+      fetchHistory() // refresh history after a successful conversion
     } catch (err) {
       setError(err.message || `Cannot reach server. Is the Java API running on ${API_BASE}?`)
       setConverted(null)
@@ -168,6 +188,24 @@ function App() {
       {error && <span className="error-hint">{error}</span>}
       {converted != null && !error && (
         <span className="copy-hint">Click result to copy</span>
+      )}
+
+      {history.length > 0 && (
+        <section className="history-section" aria-label="Recent conversions">
+          <h2 className="history-title">Recent conversions</h2>
+          <ul className="history-list">
+            {history.map((entry, i) => (
+              <li key={`${entry.timestamp}-${i}`} className="history-item">
+                <span className="history-entry">
+                  {Number(entry.amount) === entry.amount && entry.amount % 1 === 0
+                    ? Math.round(entry.amount)
+                    : Number(entry.amount)}
+                  {' '}{entry.from} → {Number(entry.result).toFixed(2)} {entry.to}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </section>
       )}
     </div>
   )
